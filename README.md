@@ -1,1 +1,3 @@
-# swift-wsrpc
+# wsrpc
+
+A description of this package.
