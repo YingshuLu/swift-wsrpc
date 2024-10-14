@@ -30,6 +30,8 @@ private class UrlInfo {
 @available(iOS 14.0, macOS 11.0, *)
 public class Client {
     
+    private var timeout: Int
+
     private var host: String
     
     private var services: ServiceHolder = serviceHolder()
@@ -46,15 +48,20 @@ public class Client {
     
     public init(host: String) {
         self.host = host
+        self.timeout = 3
         timer = DispatchSource.makeTimerSource(queue: self.backgroundQueue)
         self.inspection()
     }
     
-    public func AddService<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(service: Service<T, U>) {
-        self.services.AddService(service: service)
+    public func addService<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(service: Service<T, U>) {
+        self.services.addService(service: service)
     }
     
-    public func connect(wsUrl: String, provider: HeaderProvider?) throws -> Connection {
+    public func connect(wsUrl: String, timeoutSeconds: Int, provider: HeaderProvider?) throws -> Connection {
+        if timeoutSeconds > 0 {
+            self.timeout = timeoutSeconds
+        }
+
         var request = URLRequest(url: URL(string: wsUrl)!)
         request.timeoutInterval = 10
         request.setValue(self.host, forHTTPHeaderField: WebSocketUpgrader.hostIdKey)
@@ -71,13 +78,13 @@ public class Client {
         socket.delegate = connection
         socket.connect()
         
-        if connection.isClosed == true {
+        if !connection.waitConnected(timeout: DispatchTime.now() + Double(self.timeout)) {
             #if DEBUG
             print("websocket connect failure")
             #endif
             throw RpcClientError.ConnectError("connect to \(wsUrl) error \(connection.closeError)")
         }
-        self.services.AddConnection(connection: connection)
+        self.services.addConnection(connection: connection)
         self.lock.lock()
         defer{ self.lock.unlock() }
         self.urls[connection.peer] = UrlInfo(peer: connection.peer, url: wsUrl, provider: provider)
@@ -87,7 +94,7 @@ public class Client {
     public func close() {
         timer.cancel()
         for (peer, _) in self.urls {
-            let conn = self.services.GetConnection(peer: peer)
+            let conn = self.services.getConnection(peer: peer)
             conn?.close()
         }
         isClosed = true
@@ -98,22 +105,13 @@ public class Client {
             self.timer.schedule(deadline: .now(), repeating: .seconds(600))
             self.timer.setEventHandler {
                     for (peer, url) in self.urls {
-                        var conn = self.services.GetConnection(peer: peer)
+                        var conn = self.services.getConnection(peer: peer)
                         if conn == nil || conn!.isClosed {
                             do {
-                                conn = try self.connect(wsUrl: url.url, provider: url.provider)
+                                conn = try self.connect(wsUrl: url.url, timeoutSeconds: self.timeout, provider: url.provider)
                             } catch {
                                 continue
                             }
-                        }
-                        
-                        do {
-                            let proxy = conn!.getProxy(name: "_rpc.keepalive_.keepalive", options: Options.withRpcTimeout(timeout: 5000))
-                            let ping = Ping()
-                            var _: Pong = try proxy.Call(request: ping)
-                        } catch {
-                            print("keepalive error: \(error.localizedDescription)")
-                            //conn!.close()
                         }
                     }
                 }

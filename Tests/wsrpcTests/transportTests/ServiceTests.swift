@@ -13,8 +13,11 @@ final class ServiceTests: XCTestCase {
     func testExample() throws {
         do {
             let echoClient = Client(host: "echo_client")
-            _ = try echoClient.connect(wsUrl: "ws://localhost:9090/websocket", provider: nil)
-            sleep(30)
+            let connection = try echoClient.connect(wsUrl: "ws://localhost:9000/ws/broker", timeoutSeconds: 3, provider: nil)
+            XCTAssertTrue(connection.peer.count > 0)
+            print("connection connected \(connection.peer)")
+            sleep(3)
+            
             echoClient.close()
         } catch RpcProxyError.ServiceError(let message){
             print("echo client error \(message)")

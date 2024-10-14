@@ -24,10 +24,13 @@ let package = Package(
             name: "wsrpc",
             dependencies: [.product(name: "SwiftProtobuf", package: "swift-protobuf"),
                            .product(name: "Starscream", package: "Starscream"),
-                          ]
+                          ],
+            path: "Sources"
         ),
         .testTarget(
             name: "wsrpcTests",
-            dependencies: ["wsrpc"]),
+            dependencies: ["wsrpc"],
+            path: "Tests"
+        ),
     ]
 )

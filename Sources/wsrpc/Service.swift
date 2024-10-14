@@ -24,7 +24,7 @@ public class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: Internal
         self.name = name
     }
    
-    public func Serve(request: T) throws -> U {
+    public func serve(request: T) throws -> U {
         throw internalError.notImplement("service \(self.name) not implement")
     }
     
@@ -34,7 +34,7 @@ public class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: Internal
         
         do {
             let request = try parseRequest(data: requestMessage.Data!)
-            let reply = try Serve(request: request)
+            let reply = try serve(request: request)
             let data = try reply.serializedData()
             replyMessage.type = RpcType.reply.rawValue
             replyMessage.Data = [UInt8](data)

@@ -14,6 +14,13 @@ enum FrameFlag: UInt8 {
     case AckFlag = 1
 }
 
+enum FrameOpcode: UInt8 {
+    case Open = 1
+    case Accept = 2
+    case Stream = 3
+    case Finish = 4
+}
+
 enum ParseCode {
     case ok, needMore, illegal
 }

@@ -42,6 +42,9 @@ class WebSocketUpgrader {
 
 @available(iOS 14.0, macOS 11.0, *)
 public class Connection: WebSocketDelegate {
+
+    private var connectedSemaphore = DispatchSemaphore(value: 0) 
+
     public var host: String
     
     public var id: String = "anoymous"
@@ -83,6 +86,7 @@ public class Connection: WebSocketDelegate {
             self.id = getHttpFieldValue(headers, WebSocketUpgrader.connectionIdKey) ?? "anoymous"
             self.peer = getHttpFieldValue(headers, WebSocketUpgrader.hostIdKey) ?? "anonymous"
             writePumpThread()
+            connectedSemaphore.signal()
             
         case .disconnected:
             self.close()
@@ -149,7 +153,7 @@ public class Connection: WebSocketDelegate {
         switch message.type {
         case RpcType.request.rawValue:
             let name = message.service
-            let service = self.services.GetService(name: name)
+            let service = self.services.getService(name: name)
             if service != nil {
                 let replyMessage = service!.invokeInternal(requestMessage: message)
                 self.sendMessage(message: replyMessage)
@@ -212,7 +216,7 @@ public class Connection: WebSocketDelegate {
     
     func close() {
         if !isClosed {
-            services.RemoveConnection(peer: self.peer)
+            services.removeConnection(peer: self.peer)
             isClosed = true
             sendingQueue.stop()
             socket.disconnect()
@@ -220,6 +224,15 @@ public class Connection: WebSocketDelegate {
             // break circle reference
             socket.delegate = nil
         }
+    }
+
+    func waitConnected(timeout: DispatchTime) -> Bool {
+        let result = connectedSemaphore.wait(timeout: timeout)
+        if result == DispatchTimeoutResult.timedOut {
+            close()
+            return false
+        }
+        return !isClosed
     }
     
 }
