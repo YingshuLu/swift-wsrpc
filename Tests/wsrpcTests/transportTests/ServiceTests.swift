@@ -12,7 +12,7 @@ import os
 final class ServiceTests: XCTestCase {
     func testExample() throws {
         do {
-            let echoClient = Client(host: "echo_client")
+            let echoClient = wsrpc.Client(host: "echo_client")
             let connection = try echoClient.connect(wsUrl: "ws://localhost:9000/ws/broker", timeoutSeconds: 3, provider: nil)
             XCTAssertTrue(connection.peer.count > 0)
             print("connection connected \(connection.peer)")

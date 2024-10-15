@@ -13,7 +13,7 @@ protocol InternalService {
     func invokeInternal(requestMessage: Message) -> Message
 }
 
-public class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalService {
+open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalService {
     private enum internalError: Error {
         case notImplement(String)
     }
