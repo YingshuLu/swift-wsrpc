@@ -27,7 +27,7 @@ open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalSe
         self.name = name
     }
    
-    public func serve(request: T) throws -> U {
+    open func serve(request: T) throws -> U {
         throw internalError.notImplement("service \(self.name) not implement")
     }
     
