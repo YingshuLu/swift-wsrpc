@@ -8,30 +8,6 @@
 import Foundation
 import SwiftProtobuf
 
-enum RpcProxyError: Error {
-    case ServiceError(String)
-}
-
-public typealias Option = (Options) -> Void
-
-public class Options {
-    var RpcTimeout: UInt64 = 0
-    
-    var RoundTripTimeout: UInt64 = 0
-    
-    func apply(options: [Option]) {
-        for f in options {
-            f(self)
-        }
-    }
-    
-    public static func withRpcTimeout(timeout: UInt64) -> Option {
-        return { options in
-            options.RpcTimeout = timeout
-        }
-    }
-}
-
 @available(iOS 14.0, macOS 11.0, *)
 public class Proxy {
 
@@ -47,19 +23,18 @@ public class Proxy {
         self.options.apply(options: options)
     }
     
-    public func Call<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(request: T) throws -> U {
-        let requestData = try request.serializedData()
-        let replyMessage = try self.connection.call(name: self.name, requestData: [UInt8](requestData), options: self.options)
+    public func call<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(request: T) throws -> U {
+        let requestData = try Codec.toBytes(message: request, type: options.serializer)
         
+        let replyMessage = try self.connection.call(name: self.name, requestData: requestData, options: self.options)
         if replyMessage.type == RpcType.error.rawValue {
             print("reply error: \(replyMessage.error)")
             throw RpcProxyError.ServiceError(replyMessage.error)
         }
         
-        let reply = try U(serializedData: Data(replyMessage.Data!))
+        let reply: U = try Codec.toMessage(data: replyMessage.bytes, type: options.serializer)
         return reply
     }
-    
 }
 
 @available(macOS 11.0, *)

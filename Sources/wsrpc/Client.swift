@@ -50,11 +50,11 @@ public class Client {
         self.host = host
         self.timeout = 3
         timer = DispatchSource.makeTimerSource(queue: self.backgroundQueue)
-        self.inspection()
+        //self.inspection()
     }
     
-    public func addService<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(service: Service<T, U>) {
-        self.services.addService(service: service)
+    public func addService<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(service: Service<T, U>, options: Option...) {
+        self.services.addService(service: service, options: options)
     }
     
     public func connect(wsUrl: String, timeoutSeconds: Int, provider: HeaderProvider?) throws -> Connection {

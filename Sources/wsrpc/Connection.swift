@@ -80,6 +80,18 @@ public class Connection: WebSocketDelegate {
         self.backgroundQueue = backgroundQueue
     }
     
+    public func close() {
+        if !isClosed {
+            services.removeConnection(peer: self.peer)
+            isClosed = true
+            sendingQueue.stop()
+            socket.disconnect()
+            
+            // break circle reference
+            socket.delegate = nil
+        }
+    }
+    
     public func didReceive(event: WebSocketEvent, client: WebSocketClient) {
         switch event {
         case .connected(let headers):
@@ -92,8 +104,7 @@ public class Connection: WebSocketDelegate {
             self.close()
             
         case .binary(let data):
-            var bytes = [UInt8](data)
-            let (code, frame) = Frame.Parse(data: &bytes)
+            let (code, frame) = Frame.parse(data: data)
             if code != ParseCode.ok {
                 logger.error("parse frame error")
                 break
@@ -115,7 +126,7 @@ public class Connection: WebSocketDelegate {
         }
     }
     
-    func getHttpFieldValue(_ headers: [String:String], _ field: String) -> String? {
+    private func getHttpFieldValue(_ headers: [String:String], _ field: String) -> String? {
         for (key, value) in headers {
             if key.uppercased() == field {
                 return value
@@ -124,11 +135,11 @@ public class Connection: WebSocketDelegate {
         return nil
     }
     
-    func nextMessageId() -> UInt32 {
+    private func nextMessageId() -> UInt32 {
         return UInt32(OSAtomicAdd32(1, &self.messageId))
     }
     
-    func call(name: String, requestData: [UInt8], options: Options) throws -> Message {
+    internal func call(name: String, requestData: Data, options: Options) throws -> Message {
         let requestMessage = Message(data: requestData)
         requestMessage.type = RpcType.request.rawValue
         requestMessage.id = self.nextMessageId()
@@ -139,19 +150,18 @@ public class Connection: WebSocketDelegate {
         defer { removeReplyNotify(id: requestMessage.id) }
         
         return notify.sendAndWait(request: requestMessage,
-                                              timeout: DispatchTime.now() + Double(options.RpcTimeout))
+                                              timeout: DispatchTime.now() + Double(options.rpcTimeout))
     }
     
-    func handleRpc(frame: Frame) {
-        var payload = frame.payload
-        let (code, anyMesssage) = Message.Decode(data: &payload!)
+    internal func handleRpc(frame: Frame) {
+        let (code, anyMesssage) = Message.decode(data: frame.payload)
         if code != RpcParseCode.ok {
             return
         }
         
         let message: Message = anyMesssage!
-        switch message.type {
-        case RpcType.request.rawValue:
+        switch RpcType(rawValue: message.type) {
+        case .request:
             let name = message.service
             let service = self.services.getService(name: name)
             if service != nil {
@@ -162,47 +172,46 @@ public class Connection: WebSocketDelegate {
             }
             break
             
-        case RpcType.reply.rawValue, RpcType.error.rawValue:
+        case .reply, .error:
             let notify = getReplyNotify(id: message.id)
             notify?.notify(reply: message)
             
         default:
             break
         }
-        
     }
     
-    func getReplyNotify(id: UInt32) -> ReplyMessageNotify? {
+    internal func getReplyNotify(id: UInt32) -> ReplyMessageNotify? {
         replyNotifyLock.lock()
         let notify = replyNotifyMap[id]
         replyNotifyLock.unlock()
         return notify
     }
     
-    func setReplyNotify(id: UInt32, notify: ReplyMessageNotify) {
+    internal func setReplyNotify(id: UInt32, notify: ReplyMessageNotify) {
         replyNotifyLock.lock()
         replyNotifyMap[id] = notify
         replyNotifyLock.unlock()
     }
     
-    func removeReplyNotify(id: UInt32) {
+    internal func removeReplyNotify(id: UInt32) {
         replyNotifyLock.lock()
         replyNotifyMap[id] = nil
         replyNotifyLock.unlock()
     }
     
-    func replyServiceNotFound(request: Message) -> Message {
+    private func replyServiceNotFound(request: Message) -> Message {
         return Message.replyError(id: request.id, error: "not found service \(request.service)")
     }
     
-    func sendMessage(message: Message) {
-        let data = message.Encode()
+    private func sendMessage(message: Message) {
+        let data = message.encode()
         let frame = Frame(payload: data)
         frame.flag = FrameFlag.RpcFlag.rawValue
         sendingQueue.push(value: frame)
     }
     
-    func writePumpThread() {
+    private func writePumpThread() {
         backgroundQueue.async {
             while !self.isClosed {
                 let frame = self.sendingQueue.poll()
@@ -214,19 +223,7 @@ public class Connection: WebSocketDelegate {
         }
     }
     
-    func close() {
-        if !isClosed {
-            services.removeConnection(peer: self.peer)
-            isClosed = true
-            sendingQueue.stop()
-            socket.disconnect()
-            
-            // break circle reference
-            socket.delegate = nil
-        }
-    }
-
-    func waitConnected(timeout: DispatchTime) -> Bool {
+    internal func waitConnected(timeout: DispatchTime) -> Bool {
         let result = connectedSemaphore.wait(timeout: timeout)
         if result == DispatchTimeoutResult.timedOut {
             close()

@@ -24,29 +24,31 @@ class Message {
     var id: UInt32 = 0
     var service: String = ""
     var error: String = ""
-    var Data: [UInt8]?
+    var bytes: Data = Data()
     
     static let MinBufferSize = 12
     
-    init(data: [UInt8]?) {
-        self.Data = data
+    init(data: Data?) {
+        if data != nil {
+            self.bytes = data!
+        }
     }
     
-    func Encode() -> [UInt8] {
+    func encode() -> Data {
         var bufSize = Message.MinBufferSize + self.service.count
         if self.type == RpcType.error.rawValue {
             bufSize += self.error.count
         } else {
-            bufSize += self.Data?.count ?? 0
+            bufSize += self.bytes.count
         }
 
-        var buffer = [UInt8](repeating: 0, count: bufSize)
+        var buffer = Data(count: bufSize)
         Bytes.UInt16ToBytes(value: self.type, bytes: &buffer, start: 0)
         Bytes.UInt32ToBytes(value: self.id, bytes: &buffer, start: 2)
         let serviceLen: UInt16 = UInt16(self.service.count)
         Bytes.UInt16ToBytes(value: serviceLen, bytes: &buffer, start: 6)
         
-        let index = 8 + Int(serviceLen)
+        let index = 8 + service.count
         buffer.replaceSubrange(8..<index, with: Array(self.service.utf8))
         
         if self.type == RpcType.error.rawValue {
@@ -55,46 +57,49 @@ class Message {
             let data: [UInt8] = Array(self.error.utf8)
             buffer.replaceSubrange(index+4..<buffer.count, with: data)
         } else {
-            let dataLen: UInt32 = UInt32(self.Data?.count ?? 0)
+            let dataLen: UInt32 = UInt32(self.bytes.count)
             Bytes.UInt32ToBytes(value: dataLen, bytes: &buffer, start: index)
-            buffer.replaceSubrange(index+4..<buffer.count, with: self.Data!)
+            buffer.replaceSubrange(index+4..<buffer.count, with: self.bytes)
         }
+        
         return buffer
     }
     
-    static func Decode(data: inout [UInt8]) -> (RpcParseCode, Message?) {
+    static func decode(data: Data) -> (RpcParseCode, Message?) {
         if data.count < Message.MinBufferSize {
             return (RpcParseCode.needMore, nil)
         }
         
         let message = Message(data: nil)
-        message.type = Bytes.ToUInt16(bytes: &data, start: 0)
+        let start = data.startIndex
+        message.type = Bytes.toUInt16(data: data, start: start)
         if message.type <= RpcType.none.rawValue || message.type > RpcType.error.rawValue {
             return (RpcParseCode.illegal, nil)
         }
         
-        message.id = Bytes.ToUint32(bytes: &data, start: 2)
-        let serviceLen = Int(Bytes.ToUInt16(bytes: &data, start: 6))
+        message.id = Bytes.toUint32(data: data, start: start+2)
+        let serviceLen = Int(Bytes.toUInt16(data: data, start: start+6))
         if data.count < Message.MinBufferSize + serviceLen {
             return (RpcParseCode.needMore, nil)
         }
         
-        var index = 8 + serviceLen
+        var index = start + 8 + serviceLen
         if serviceLen > 0 {
-            message.service = String(bytes: data[8..<index], encoding: .utf8)!
+            message.service = String(bytes: data[start+8..<index], encoding: .utf8)!
         }
         
-        let dataLen = Int(Bytes.ToUint32(bytes: &data, start: index))
+        let dataLen = Int(Bytes.toUint32(data: data, start: index))
         if data.count < index + 4 + dataLen {
             return (RpcParseCode.needMore, nil)
         }
         
         index += 4
         if message.type == RpcType.error.rawValue {
-            message.error = String(bytes: Array(data[index...]), encoding: .utf8)!
+            let errString = String(data: data[index...], encoding: .ascii)
+            message.error = errString ?? "null"
         } else {
-            let bytes = Array(data[index...])
-            message.Data = bytes
+            let bytes = data[index...]
+            message.bytes = bytes
         }
         return (RpcParseCode.ok, message)
     }

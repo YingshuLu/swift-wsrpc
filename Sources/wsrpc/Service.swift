@@ -8,8 +8,9 @@
 import Foundation
 import SwiftProtobuf
 
-protocol InternalService {
+internal protocol InternalService {
     var name: String { get }
+    var options: Options { get }
     func invokeInternal(requestMessage: Message) -> Message
 }
 
@@ -20,6 +21,8 @@ open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalSe
     
     var name: String
     
+    var options = Options()
+    
     public init(name: String) {
         self.name = name
     }
@@ -28,26 +31,19 @@ open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalSe
         throw internalError.notImplement("service \(self.name) not implement")
     }
     
-    func invokeInternal(requestMessage: Message) -> Message {
+    internal func invokeInternal(requestMessage: Message) -> Message {
         let replyMessage = Message(data: nil)
         replyMessage.id = requestMessage.id
         
         do {
-            let request = try parseRequest(data: requestMessage.Data!)
+            let request: T = try Codec.toMessage(data: Data(requestMessage.bytes), type: self.options.serializer)
             let reply = try serve(request: request)
-            let data = try reply.serializedData()
             replyMessage.type = RpcType.reply.rawValue
-            replyMessage.Data = [UInt8](data)
-        } catch {
+            replyMessage.bytes = try Codec.toBytes(message: reply, type: self.options.serializer)
+        } catch let error {
             replyMessage.type = RpcType.error.rawValue
             replyMessage.error = error.localizedDescription
         }
         return replyMessage
     }
-    
-    private func parseRequest(data: [UInt8]) throws -> T {
-        let request = try T(serializedData: Data(data))
-        return request
-    }
-    
 }
