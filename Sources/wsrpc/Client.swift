@@ -9,10 +9,6 @@ import Foundation
 import Starscream
 import SwiftProtobuf
 
-enum RpcClientError: Error {
-    case ConnectError(String)
-}
-
 public typealias HeaderProvider = () ->[String : String]
 
 private class UrlInfo {
@@ -29,8 +25,7 @@ private class UrlInfo {
 
 @available(iOS 14.0, macOS 11.0, *)
 public class Client {
-    
-    private var timeout: Int
+    private var timeout = 10
 
     private var host: String
     
@@ -42,15 +37,26 @@ public class Client {
     
     private var isClosed = false
     
-    let backgroundQueue = DispatchQueue(label: "com.bulo.wsrpc", attributes: .concurrent)
+    private let backgroundQueue: DispatchQueue
     
-    var timer: DispatchSourceTimer
+    private let timer: DispatchSourceTimer
     
-    public init(host: String) {
+  
+    public init(host: String, timeout: Int = 10, keepConnected: Bool = false, dispatchQueue: DispatchQueue? = nil) {
         self.host = host
-        self.timeout = 3
-        timer = DispatchSource.makeTimerSource(queue: self.backgroundQueue)
-        //self.inspection()
+        self.timeout = timeout
+        
+        if let dsqueue = dispatchQueue {
+            self.backgroundQueue = dsqueue
+        } else {
+            self.backgroundQueue = DispatchQueue(label: "com.bulo.wsrpc", qos: .userInteractive, attributes: .concurrent)
+        }
+        
+        self.timer = DispatchSource.makeTimerSource(queue: self.backgroundQueue)
+        
+        if keepConnected {
+            self.inspection()
+        }
     }
     
     public func addService<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(service: Service<T, U>, options: Option...) {
@@ -58,12 +64,13 @@ public class Client {
     }
     
     public func connect(wsUrl: String, timeoutSeconds: Int, provider: HeaderProvider?) throws -> Connection {
-        if timeoutSeconds > 0 {
-            self.timeout = timeoutSeconds
+        var connectTimeout = timeoutSeconds
+        if timeoutSeconds <= 0 {
+            connectTimeout = self.timeout
         }
 
         var request = URLRequest(url: URL(string: wsUrl)!)
-        request.timeoutInterval = 10
+        request.timeoutInterval = Double(connectTimeout)
         request.setValue(self.host, forHTTPHeaderField: WebSocketUpgrader.hostIdKey)
         if let headers = provider?() {
             for (key, value) in headers {
@@ -78,7 +85,7 @@ public class Client {
         socket.delegate = connection
         socket.connect()
         
-        if !connection.waitConnected(timeout: DispatchTime.now() + Double(self.timeout)) {
+        if !connection.waitConnected(timeout: DispatchTime.now() + Double(connectTimeout)) {
             #if DEBUG
             print("websocket connect failure")
             #endif
@@ -102,7 +109,7 @@ public class Client {
     
     private func inspection() {
         self.backgroundQueue.async {
-            self.timer.schedule(deadline: .now(), repeating: .seconds(600))
+            self.timer.schedule(deadline: .now(), repeating: .seconds(180))
             self.timer.setEventHandler {
                     for (peer, url) in self.urls {
                         var conn = self.services.getConnection(peer: peer)

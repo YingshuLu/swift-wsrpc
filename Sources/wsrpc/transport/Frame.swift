@@ -1,5 +1,5 @@
 //
-//  frame.swift
+//  Frame.swift
 //  
 //
 //  Created by yingshu lu on 2023/8/22.
@@ -36,13 +36,20 @@ public class Frame {
     public var length: UInt32 = 0
     public var payload: Data = Data()
     
+    internal var count: Int {
+        get {
+            let size = payload.count == 0 ? Int(length) : payload.count
+            return Frame.FrameHeaderSize + size
+        }
+    }
+    
     static let MagicCode: UInt8 = 0x6f
     static let FrameHeaderSize = 16
     
-    init(payload: Data?) {
-        if payload != nil {
-            self.payload = payload!
-            self.length = UInt32(self.payload.count)
+    init(payload: Data? = nil) {
+        if let data = payload {
+            self.payload = data
+            self.length = UInt32(data.count)
         }
     }
     
@@ -73,7 +80,7 @@ public class Frame {
         }
         
         let start = data.startIndex
-        let frame = Frame(payload: nil)
+        let frame = Frame()
         frame.magic = data[start]
         frame.flag = data[start+1]
         frame.opcode = data[start+2]
@@ -82,10 +89,10 @@ public class Frame {
         frame.group = Bytes.toUInt16(data: data, start: start+8)
         frame.index = Bytes.toUInt16(data: data, start: start+10)
         frame.length = Bytes.toUint32(data: data, start: start+12)
-        if data.count < FrameHeaderSize + Int(frame.length) {
+        if data.count < frame.count {
             return (ParseCode.needMore, nil)
         }
-        frame.payload = data.subdata(in: start+16..<start+data.count)
+        frame.payload = data.subdata(in: start+FrameHeaderSize ..< start+frame.count)
         return (ParseCode.ok, frame)
     }
 }

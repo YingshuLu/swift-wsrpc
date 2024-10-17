@@ -69,9 +69,13 @@ public class Connection: WebSocketDelegate {
     
     private let sendingQueue = BlockingQueue<Frame>()
     
-    let backgroundQueue: DispatchQueue
+    private var cacheData = Connection.EmptyData
+    
+    private let backgroundQueue: DispatchQueue
     
     private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Connection")
+    
+    static private let EmptyData = Data()
     
     init(host: String, socket: Starscream.WebSocket, services: ServiceHolder, backgroundQueue: DispatchQueue) {
         self.host = host
@@ -104,13 +108,8 @@ public class Connection: WebSocketDelegate {
             self.close()
             
         case .binary(let data):
-            let (code, frame) = Frame.parse(data: data)
-            if code != ParseCode.ok {
-                logger.error("parse frame error")
-                break
-            }
-            handleRpc(frame: frame!)
-
+            handleFrame(data: data)
+            
         case .peerClosed:
             self.close()
             
@@ -153,22 +152,59 @@ public class Connection: WebSocketDelegate {
                                               timeout: DispatchTime.now() + Double(options.rpcTimeout))
     }
     
+    internal func handleFrame(data: Data) {
+        if cacheData.isEmpty {
+            cacheData = data
+        } else {
+            cacheData.append(data)
+        }
+        
+        let (code, frame) = Frame.parse(data: cacheData)
+        switch code {
+        case .ok:
+            guard let rpcFrame = frame else {
+                logger.error("parse frame ok, but frame is null, Bug!")
+                close()
+                return
+            }
+            
+            if rpcFrame.count == cacheData.count {
+                cacheData = Connection.EmptyData
+            } else {
+                cacheData = cacheData.subdata(in: cacheData.startIndex + rpcFrame.count ..< cacheData.endIndex)
+            }
+            handleRpc(frame: rpcFrame)
+            
+        case .needMore:
+            break
+            
+        case .illegal:
+            logger.error("parse frame error, closing...")
+            close()
+        }
+    }
+    
     internal func handleRpc(frame: Frame) {
         let (code, anyMesssage) = Message.decode(data: frame.payload)
         if code != RpcParseCode.ok {
+            logger.error("wsrpc decode message error")
             return
         }
         
-        let message: Message = anyMesssage!
+        guard let message = anyMesssage else {
+            return
+        }
+        
         switch RpcType(rawValue: message.type) {
         case .request:
-            let name = message.service
-            let service = self.services.getService(name: name)
-            if service != nil {
-                let replyMessage = service!.invokeInternal(requestMessage: message)
-                self.sendMessage(message: replyMessage)
-            } else {
-                self.sendMessage(message: replyServiceNotFound(request: message))
+            backgroundQueue.async {
+                let name = message.service
+                if let service = self.services.getService(name: name) {
+                    let replyMessage = service.invokeInternal(requestMessage: message)
+                    self.sendMessage(message: replyMessage)
+                } else {
+                    self.sendMessage(message: self.replyServiceNotFound(request: message))
+                }
             }
             break
             

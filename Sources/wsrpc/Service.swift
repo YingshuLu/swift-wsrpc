@@ -36,10 +36,10 @@ open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalSe
         replyMessage.id = requestMessage.id
         
         do {
-            let request: T = try Codec.toMessage(data: Data(requestMessage.bytes), type: self.options.serializer)
+            let request: T = try Codec.decode(data: Data(requestMessage.bytes), type: self.options.serializer)
             let reply = try serve(request: request)
             replyMessage.type = RpcType.reply.rawValue
-            replyMessage.bytes = try Codec.toBytes(message: reply, type: self.options.serializer)
+            replyMessage.bytes = try Codec.encode(message: reply, type: self.options.serializer)
         } catch let error {
             replyMessage.type = RpcType.error.rawValue
             replyMessage.error = error.localizedDescription

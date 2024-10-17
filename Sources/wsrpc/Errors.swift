@@ -9,3 +9,7 @@ public enum RpcProxyError: Error {
     case ServiceError(String)
     case SerializeError(String)
 }
+
+public enum RpcClientError: Error {
+    case ConnectError(String)
+}

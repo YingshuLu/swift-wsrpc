@@ -24,7 +24,7 @@ public class Proxy {
     }
     
     public func call<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(request: T) throws -> U {
-        let requestData = try Codec.toBytes(message: request, type: options.serializer)
+        let requestData = try Codec.encode(message: request, type: options.serializer)
         
         let replyMessage = try self.connection.call(name: self.name, requestData: requestData, options: self.options)
         if replyMessage.type == RpcType.error.rawValue {
@@ -32,7 +32,7 @@ public class Proxy {
             throw RpcProxyError.ServiceError(replyMessage.error)
         }
         
-        let reply: U = try Codec.toMessage(data: replyMessage.bytes, type: options.serializer)
+        let reply: U = try Codec.decode(data: replyMessage.bytes, type: options.serializer)
         return reply
     }
 }
