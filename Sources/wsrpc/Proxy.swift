@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftProtobuf
+import os
 
 @available(iOS 14.0, macOS 11.0, *)
 public class Proxy {
@@ -16,6 +17,8 @@ public class Proxy {
     private var connection: Connection
     
     private let name: String
+    
+    private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Proxy")
     
     init(name: String, connection: Connection, options: [Option]) {
         self.name = name
@@ -28,7 +31,7 @@ public class Proxy {
         
         let replyMessage = try self.connection.call(name: self.name, requestData: requestData, options: self.options)
         if replyMessage.type == RpcType.error.rawValue {
-            print("reply error: \(replyMessage.error)")
+            logger.error("reply error: \(replyMessage.error)")
             throw RpcProxyError.ServiceError(replyMessage.error)
         }
         

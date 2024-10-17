@@ -13,3 +13,11 @@ public enum RpcProxyError: Error {
 public enum RpcClientError: Error {
     case ConnectError(String)
 }
+
+public enum StreamError: Error {
+    case RecvError(String)
+    case SendError(String)
+    case TimeoutError(String)
+    case BrokenFrame(String)
+    case IllegalState(String)
+}

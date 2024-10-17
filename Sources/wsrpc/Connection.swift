@@ -73,6 +73,8 @@ public class Connection: WebSocketDelegate {
     
     private let backgroundQueue: DispatchQueue
     
+    private let streamController = StreamController(timeout: 3)
+    
     private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Connection")
     
     static private let EmptyData = Data()
@@ -86,6 +88,7 @@ public class Connection: WebSocketDelegate {
     
     public func close() {
         if !isClosed {
+            streamController.stop()
             services.removeConnection(peer: self.peer)
             isClosed = true
             sendingQueue.stop()
@@ -94,6 +97,14 @@ public class Connection: WebSocketDelegate {
             // break circle reference
             socket.delegate = nil
         }
+    }
+    
+    public func idleStream(timeout: Int? = nil) -> Stream? {
+        return streamController.create(timeout: timeout, sendFrame: self.sendFrame)
+    }
+    
+    public func stream(id: UInt16, timeout: Int? = nil) -> Stream? {
+        return streamController.getOrCreate(id: id, timeout: timeout, sendFrame: self.sendFrame)
     }
     
     public func didReceive(event: WebSocketEvent, client: WebSocketClient) {
@@ -162,18 +173,26 @@ public class Connection: WebSocketDelegate {
         let (code, frame) = Frame.parse(data: cacheData)
         switch code {
         case .ok:
-            guard let rpcFrame = frame else {
+            guard let anyFrame = frame else {
                 logger.error("parse frame ok, but frame is null, Bug!")
                 close()
                 return
             }
             
-            if rpcFrame.count == cacheData.count {
+            if anyFrame.count == cacheData.count {
                 cacheData = Connection.EmptyData
+            } else if anyFrame.count < cacheData.count {
+                cacheData = cacheData.subdata(in: cacheData.startIndex + anyFrame.count ..< cacheData.endIndex)
             } else {
-                cacheData = cacheData.subdata(in: cacheData.startIndex + rpcFrame.count ..< cacheData.endIndex)
+                logger.fault("cacheData.startIndex: \(self.cacheData.startIndex), cacheData.count: \(self.cacheData.count), anyFrame.count: \(anyFrame.count), anyFrame.payload: \(anyFrame.payload.count)")
             }
-            handleRpc(frame: rpcFrame)
+            
+            if anyFrame.flag & FrameFlag.bin.rawValue != 0 {
+                logger.debug("get stream \(anyFrame.group) frame")
+                handleStreamFrame(frame: anyFrame)
+            } else {
+                handleRpcFrame(frame: anyFrame)
+            }
             
         case .needMore:
             break
@@ -184,7 +203,7 @@ public class Connection: WebSocketDelegate {
         }
     }
     
-    internal func handleRpc(frame: Frame) {
+    internal func handleRpcFrame(frame: Frame) {
         let (code, anyMesssage) = Message.decode(data: frame.payload)
         if code != RpcParseCode.ok {
             logger.error("wsrpc decode message error")
@@ -217,6 +236,15 @@ public class Connection: WebSocketDelegate {
         }
     }
     
+    private func handleStreamFrame(frame: Frame) {
+        let id = frame.group
+        guard let stream = streamController.get(id: id) else {
+            logger.error("handleStreamFrame - stream \(id) not found")
+            return
+        }
+        stream.push(frame: frame)
+    }
+    
     internal func getReplyNotify(id: UInt32) -> ReplyMessageNotify? {
         replyNotifyLock.lock()
         let notify = replyNotifyMap[id]
@@ -243,8 +271,18 @@ public class Connection: WebSocketDelegate {
     private func sendMessage(message: Message) {
         let data = message.encode()
         let frame = Frame(payload: data)
-        frame.flag = FrameFlag.RpcFlag.rawValue
-        sendingQueue.push(value: frame)
+        frame.flag = FrameFlag.rpc.rawValue
+        let _ = sendFrame(frame: frame)
+    }
+    
+    private func sendFrame(frame: Frame) -> Bool {
+        do {
+            try sendingQueue.push(value: frame)
+            return true
+        } catch let error {
+            logger.error("send frame error \(error)")
+        }
+        return false
     }
     
     private func writePumpThread() {

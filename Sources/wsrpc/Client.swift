@@ -41,7 +41,6 @@ public class Client {
     
     private let timer: DispatchSourceTimer
     
-  
     public init(host: String, timeout: Int = 10, keepConnected: Bool = false, dispatchQueue: DispatchQueue? = nil) {
         self.host = host
         self.timeout = timeout

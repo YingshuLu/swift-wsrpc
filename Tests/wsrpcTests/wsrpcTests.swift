@@ -10,7 +10,7 @@ final class Endpoint: Service<Chat_Message, Chat_MessageAck> {
     private let url: String
     
     private let client: Client
-    private var connection: Connection?
+    internal var connection: Connection?
     
     init(id: UInt64, url: String) {
         hostId = "\(id)"
@@ -71,8 +71,40 @@ final class Endpoint: Service<Chat_Message, Chat_MessageAck> {
 
 final class LocalTests: XCTestCase {
     func testExample() throws {
-            let endpoint = Endpoint(id:12345, url: "ws://localhost:9000/ws/broker")
-            XCTAssertTrue(endpoint.connect())
-            XCTAssertTrue(endpoint.send(message: "hello this is macos"))
+        let endpoint = Endpoint(id:12345, url: "ws://localhost:9000/ws/broker")
+        XCTAssertTrue(endpoint.connect())
+        
+        DispatchQueue.global(qos: .userInteractive).async {
+            let stream = endpoint.connection?.stream(id: 128, timeout: 5)
+            
+            guard let listenStream = stream else {
+                print(">>>>>>> stream 128 not existed")
+                return
+            }
+            do {
+                print(">>>>> stream 128 is listening")
+                try listenStream.accept()
+                print(">>>>>accept \(listenStream.id()) success")
+                
+                let content = ">>>>> hello this from stream 128"
+                listenStream.write(data: content.data(using: .utf8)!)
+                let (code, data) = listenStream.read()
+                guard code == .ok else {
+                    print(">>>>> read stream error")
+                    return
+                }
+                print(">>>>> read from stream count: \(data!.count), content: \(String(data: data!, encoding: .utf8))")
+                
+                sleep(1)
+                listenStream.close()
+                
+            } catch let error {
+                print("stream \(listenStream.id()) accept error \(error)")
+            }
+        }
+           
+        XCTAssertTrue(endpoint.send(message: "hello this is macos"))
+        
+        sleep(6)
     }
 }

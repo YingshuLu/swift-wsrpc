@@ -7,6 +7,10 @@
 
 import Foundation
 
+enum QueueError: Error {
+    case OperationError(String)
+}
+
 class Node<T> {
     var value: T
     var next: Node<T>?
@@ -78,7 +82,11 @@ class BlockingQueue<T> {
     
     var isStopped = false
     
-    func push(value: T) {
+    func push(value: T) throws {
+        if isStopped {
+            throw QueueError.OperationError("push stopped queue")
+        }
+        
         condition.lock()
         defer { condition.unlock() }
         
@@ -90,24 +98,31 @@ class BlockingQueue<T> {
         condition.lock()
         defer { condition.unlock() }
         
-        while queue.peek() == nil || isStopped {
+        if isStopped {
+            return queue.pop()
+        }
+        
+        while queue.peek() == nil {
             if !condition.wait(until: waitTimeout) {
                 return nil
             }
         }
-        let value = queue.pop()
-        return value
+        return queue.pop()
     }
     
     func poll() -> T? {
         condition.lock()
         defer { condition.unlock() }
         
-        while queue.peek() == nil || isStopped {
+        if isStopped {
+            return queue.pop()
+        }
+        
+        while queue.peek() == nil {
             condition.wait()
         }
-        let value = queue.pop()
-        return value
+        
+        return queue.pop()
     }
     
     func stop() {

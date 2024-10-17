@@ -8,17 +8,17 @@
 import Foundation
 
 enum FrameFlag: UInt8 {
-    case NextFlag = 8
-    case BinFlag = 4
-    case RpcFlag = 2
-    case AckFlag = 1
+    case next = 8
+    case bin = 4
+    case rpc = 2
+    case ack = 1
 }
 
 enum FrameOpcode: UInt8 {
-    case Open = 1
-    case Accept = 2
-    case Stream = 3
-    case Finish = 4
+    case stream = 1
+    case open = 2
+    case close = 3
+    case accept = 4
 }
 
 enum ParseCode {
@@ -87,12 +87,13 @@ public class Frame {
         frame.reserved = data[start+3]
         frame.checkSum = Bytes.toUint32(data: data, start: start+4)
         frame.group = Bytes.toUInt16(data: data, start: start+8)
+
         frame.index = Bytes.toUInt16(data: data, start: start+10)
         frame.length = Bytes.toUint32(data: data, start: start+12)
         if data.count < frame.count {
-            return (ParseCode.needMore, nil)
+            return (.needMore, nil)
         }
         frame.payload = data.subdata(in: start+FrameHeaderSize ..< start+frame.count)
-        return (ParseCode.ok, frame)
+        return (.ok, frame)
     }
 }
