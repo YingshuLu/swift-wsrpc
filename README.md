@@ -1,3 +1,3 @@
 # wsrpc
 
-A description of this package.
+WebSocket RPC for swift
