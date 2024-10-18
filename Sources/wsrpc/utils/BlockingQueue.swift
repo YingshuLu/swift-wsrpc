@@ -125,6 +125,12 @@ class BlockingQueue<T> {
         return queue.pop()
     }
     
+    func peek() -> T? {
+        condition.lock()
+        defer { condition.unlock() }
+        return queue.peek()
+    }
+    
     func stop() {
         condition.lock()
         defer { condition.unlock() }

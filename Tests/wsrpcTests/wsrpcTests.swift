@@ -75,7 +75,7 @@ final class LocalTests: XCTestCase {
         XCTAssertTrue(endpoint.connect())
         
         DispatchQueue.global(qos: .userInteractive).async {
-            let stream = endpoint.connection?.stream(id: 128, timeout: 5)
+            let stream = endpoint.connection?.stream(id: 128, timeout: 10)
             
             guard let listenStream = stream else {
                 print(">>>>>>> stream 128 not existed")
@@ -90,7 +90,7 @@ final class LocalTests: XCTestCase {
                 listenStream.write(data: content.data(using: .utf8)!)
                 let (code, data) = listenStream.read()
                 guard code == .ok else {
-                    print(">>>>> read stream error")
+                    print(">>>>> read stream error \(code)")
                     return
                 }
                 print(">>>>> read from stream count: \(data!.count), content: \(String(data: data!, encoding: .utf8))")
@@ -105,6 +105,6 @@ final class LocalTests: XCTestCase {
            
         XCTAssertTrue(endpoint.send(message: "hello this is macos"))
         
-        sleep(6)
+        sleep(3)
     }
 }

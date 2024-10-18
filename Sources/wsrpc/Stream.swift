@@ -38,9 +38,11 @@ internal class StreamController {
     private var streams = [UInt16: StreamImpl]()
     private let lock = NSLock()
     private let timeout: Int
+    private let dispatchQueue: DispatchQueue
     
-    internal init(timeout: Int) {
+    internal init(timeout: Int, dispatchQueue: DispatchQueue) {
         self.timeout = timeout
+        self.dispatchQueue = dispatchQueue
     }
     
     private func idle() -> UInt16 {
@@ -72,7 +74,7 @@ internal class StreamController {
             tm = t
         }
         
-        let stream = StreamImpl(id: id, timeout: tm, sendFrame: sendFrame, clean: self.clean)
+        let stream = StreamImpl(id: id, timeout: tm, sendFrame: sendFrame, clean: self.clean, dispatchQueue: self.dispatchQueue)
         streams[id] = stream
         
         return stream
@@ -94,7 +96,7 @@ internal class StreamController {
         }
         
         guard let stream = streams[id] else {
-            let s = StreamImpl(id: id, timeout: tm, sendFrame: sendFrame, clean: self.clean)
+            let s = StreamImpl(id: id, timeout: tm, sendFrame: sendFrame, clean: self.clean, dispatchQueue: self.dispatchQueue)
             streams[id] = s
             return s
         }
@@ -132,11 +134,14 @@ class StreamImpl: Stream {
     
     private var finFrameCondition = DispatchSemaphore(value: 0)
     
-    internal init(id: UInt16, timeout: Int, sendFrame: @escaping (Frame) -> Bool, clean: @escaping (Stream) -> Void) {
+    private let dispatchQueue: DispatchQueue
+    
+    internal init(id: UInt16, timeout: Int, sendFrame: @escaping (Frame) -> Bool, clean: @escaping (Stream) -> Void, dispatchQueue: DispatchQueue) {
         self.sid = id
         self.timeout = timeout
         self.sendFrame = sendFrame
         self.clean = clean
+        self.dispatchQueue = dispatchQueue
     }
     
     public func id() -> UInt16 {
@@ -216,8 +221,32 @@ class StreamImpl: Stream {
         guard let frame = pollFrame() else {
             return (.error, nil)
         }
-
-        return (.ok, frame.payload)
+        
+        guard let type = typeFrame(frame: frame) else {
+            return (.error, nil)
+        }
+        
+        // here state should be .streaming or .finWait
+        switch type {
+        case .close:
+            if state == .streaming {
+                state = .closeWait
+                return (.eof, nil)
+            }
+            
+        case .accept, .open:
+            if state == .streaming {
+                close()
+            } else {
+                finFrameCondition.signal()
+            }
+            return (.error, nil)
+            
+        case .stream:
+            return (.ok, frame.payload)
+        }
+        
+        return (.error, nil)
     }
     
     public func write(data: Data) -> IOCode {
@@ -245,38 +274,52 @@ class StreamImpl: Stream {
     }
     
     public func close() {
-        defer {
-            if state != .closed {
-                clean(self)
-                cache.stop()
-            }
-            state = .closed
+        if state == .closed {
+            return
         }
         
-        repeat {
-            switch state {
-            case .inited, .closed:
-                return
-                
-            case .openning, .accepting, .streaming:
-                if sendFrame(finFrame) {
-                    state = .finWait
-                } else {
-                    return
+        dispatchQueue.async {
+            defer {
+                if self.state != .closed {
+                    self.clean(self)
+                    self.cache.stop()
                 }
-                
-            case .finWait:
-                if finFrameCondition.wait(timeout: .now() + .seconds(self.timeout)) == .timedOut {
-                    logger.warning("close finWait timeout")
-                    return
-                }
-                return
-                
-            case .closeWait:
-                let _ = sendFrame(finFrame)
-                return
+                self.state = .closed
             }
-        } while(true)
+            
+            repeat {
+                switch self.state {
+                case .inited, .closed:
+                    return
+                    
+                case .openning, .accepting, .streaming:
+                    var finFrameArrived = false
+                    if let frame = self.cache.peek() {
+                        if let type = self.typeFrame(frame: frame) {
+                            if type == .close {
+                                finFrameArrived = true
+                            }
+                        }
+                    }
+                    if self.sendFrame(self.finFrame) {
+                        self.state = finFrameArrived ? .closed : .finWait
+                    } else {
+                        return
+                    }
+                    
+                case .finWait:
+                    if self.finFrameCondition.wait(timeout: .now() + .seconds(self.timeout)) == .timedOut {
+                        self.logger.warning("close finWait timeout")
+                        return
+                    }
+                    return
+                    
+                case .closeWait:
+                    let _ = self.sendFrame(self.finFrame)
+                    return
+                }
+            } while(true)
+        }
     }
     
     internal func push(frame: Frame) {
@@ -284,7 +327,7 @@ class StreamImpl: Stream {
             logger.info("push stream \(self.sid) frame: \(t.rawValue), payload: \(frame.payload.count)")
         }
         if FrameOpcode(rawValue: frame.opcode) == .close {
-            if state == .streaming || state == .accepting || state == .openning {
+            if state == .accepting || state == .openning {
                 state = .closeWait
             }
             

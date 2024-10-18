@@ -69,21 +69,26 @@ public class Connection: WebSocketDelegate {
     
     private let sendingQueue = BlockingQueue<Frame>()
     
+    private let cacheDataLock = NSLock()
+    
     private var cacheData = Connection.EmptyData
     
     private let backgroundQueue: DispatchQueue
     
-    private let streamController = StreamController(timeout: 3)
+    private let streamController: StreamController
     
     private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Connection")
     
     static private let EmptyData = Data()
+    
+    private var mayPieceFrame = false
     
     init(host: String, socket: Starscream.WebSocket, services: ServiceHolder, backgroundQueue: DispatchQueue) {
         self.host = host
         self.socket = socket
         self.services = services
         self.backgroundQueue = backgroundQueue
+        self.streamController = StreamController(timeout: 3, dispatchQueue: backgroundQueue)
     }
     
     public func close() {
@@ -163,14 +168,12 @@ public class Connection: WebSocketDelegate {
                                               timeout: DispatchTime.now() + Double(options.rpcTimeout))
     }
     
-    internal func handleFrame(data: Data) {
-        if cacheData.isEmpty {
-            cacheData = data
-        } else {
-            cacheData.append(data)
-        }
-        
-        let (code, frame) = Frame.parse(data: cacheData)
+    private func handleFrame(data: Data) {
+        return mayPieceFrame ? handlePieceFrame(data: data) : handleFullFrame(data: data)
+    }
+    
+    private func handleFullFrame(data: Data) {
+        let (code, frame) = Frame.parse(data: data)
         switch code {
         case .ok:
             guard let anyFrame = frame else {
@@ -179,16 +182,7 @@ public class Connection: WebSocketDelegate {
                 return
             }
             
-            if anyFrame.count == cacheData.count {
-                cacheData = Connection.EmptyData
-            } else if anyFrame.count < cacheData.count {
-                cacheData = cacheData.subdata(in: cacheData.startIndex + anyFrame.count ..< cacheData.endIndex)
-            } else {
-                logger.fault("cacheData.startIndex: \(self.cacheData.startIndex), cacheData.count: \(self.cacheData.count), anyFrame.count: \(anyFrame.count), anyFrame.payload: \(anyFrame.payload.count)")
-            }
-            
             if anyFrame.flag & FrameFlag.bin.rawValue != 0 {
-                logger.debug("get stream \(anyFrame.group) frame")
                 handleStreamFrame(frame: anyFrame)
             } else {
                 handleRpcFrame(frame: anyFrame)
@@ -200,6 +194,54 @@ public class Connection: WebSocketDelegate {
         case .illegal:
             logger.error("parse frame error, closing...")
             close()
+            break
+        }
+    }
+    
+    internal func handlePieceFrame(data: Data) {
+        cacheDataLock.lock()
+        defer { cacheDataLock.unlock() }
+        
+        if cacheData.isEmpty {
+            cacheData = data
+        } else {
+            cacheData.append(data)
+        }
+        
+        while !cacheData.isEmpty {
+            let (code, frame) = Frame.parse(data: cacheData)
+            switch code {
+            case .ok:
+                guard let anyFrame = frame else {
+                    logger.error("parse frame ok, but frame is null, Bug!")
+                    close()
+                    return
+                }
+                
+                if anyFrame.count == cacheData.count {
+                    cacheData = Connection.EmptyData
+                } else if anyFrame.count < cacheData.count {
+                    let start = cacheData.startIndex + anyFrame.count
+                    let end = cacheData.endIndex
+                    cacheData = cacheData.subdata(in: start ..< end)
+                } else {
+                    logger.fault("cacheData.startIndex: \(self.cacheData.startIndex), cacheData.count: \(self.cacheData.count), anyFrame.count: \(anyFrame.count), anyFrame.payload: \(anyFrame.payload.count)")
+                }
+                
+                if anyFrame.flag & FrameFlag.bin.rawValue != 0 {
+                    handleStreamFrame(frame: anyFrame)
+                } else {
+                    handleRpcFrame(frame: anyFrame)
+                }
+                
+            case .needMore:
+                return
+                
+            case .illegal:
+                logger.error("parse frame error, closing...")
+                close()
+                return
+            }
         }
     }
     
