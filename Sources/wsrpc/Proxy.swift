@@ -11,19 +11,16 @@ import os
 
 @available(iOS 14.0, macOS 11.0, *)
 public class Proxy {
-
-    private var options = Options()
-    
-    private var connection: Connection
-    
     private let name: String
+    private let connection: Connection
+    private let options: Options
+
+    private let logger = Logger(subsystem: "com.bulo.wsrpc", category: "Proxy")
     
-    private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Proxy")
-    
-    init(name: String, connection: Connection, options: [Option]) {
+    init(name: String, connection: Connection, options: Options) {
         self.name = name
         self.connection = connection
-        self.options.apply(options: options)
+        self.options = options
     }
     
     public func call<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(request: T) throws -> U {
@@ -43,6 +40,8 @@ public class Proxy {
 @available(macOS 11.0, *)
 public extension Connection {
     func getProxy(name: String, options: Option...) -> Proxy {
-        return Proxy(name: name, connection: self, options: options)
+        let newOptions = self.options.clone()
+        newOptions.apply(options: options)
+        return Proxy(name: name, connection: self, options: newOptions)
     }
 }

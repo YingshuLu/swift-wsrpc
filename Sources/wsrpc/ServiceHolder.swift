@@ -10,7 +10,7 @@ import Foundation
 @available(macOS 11.0, *)
 protocol ServiceHolder {
     func getService(name: String) -> InternalService?
-    func addService(service: InternalService, options: [Option]) -> Void
+    func addService(service: InternalService) -> Void
     func addConnection(connection: Connection)
     func getConnection(peer: String) -> Connection?
     func removeConnection(peer: String)
@@ -26,10 +26,8 @@ internal class serviceHolder: ServiceHolder {
         return services[name]
     }
     
-    func addService(service: InternalService, options: [Option]) {
-        service.options.apply(options: options)
+    func addService(service: InternalService) {
         services[service.name] = service
-        
     }
     
     func addConnection(connection: Connection) {

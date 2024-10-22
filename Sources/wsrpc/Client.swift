@@ -8,6 +8,7 @@
 import Foundation
 import Starscream
 import SwiftProtobuf
+import os
 
 public typealias HeaderProvider = () ->[String : String]
 
@@ -37,13 +38,18 @@ public class Client {
     
     private var isClosed = false
     
+    private var options = Options()
+    
     private let backgroundQueue: DispatchQueue
     
     private let timer: DispatchSourceTimer
     
-    public init(host: String, timeout: Int = 10, keepConnected: Bool = false, dispatchQueue: DispatchQueue? = nil) {
+    private let logger = Logger(subsystem: "com.bulo.wsrpc", category: "client")
+    
+    public init(host: String, timeout: Int = 10, keepConnected: Bool = false, dispatchQueue: DispatchQueue? = nil, options: Option...) {
         self.host = host
         self.timeout = timeout
+        self.options.apply(options: options)
         
         if let dsqueue = dispatchQueue {
             self.backgroundQueue = dsqueue
@@ -59,7 +65,10 @@ public class Client {
     }
     
     public func addService<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>(service: Service<T, U>, options: Option...) {
-        self.services.addService(service: service, options: options)
+        let newOptions = self.options.clone()
+        newOptions.apply(options: options)
+        service.options = newOptions
+        self.services.addService(service: service)
     }
     
     public func connect(wsUrl: String, timeoutSeconds: Int, provider: HeaderProvider?) throws -> Connection {
@@ -78,16 +87,14 @@ public class Client {
         }
         
         let socket = Starscream.WebSocket(request: request)
-        let connection = Connection(host: self.host, socket: socket, services: self.services, backgroundQueue: self.backgroundQueue)
+        let connection = Connection(host: self.host, socket: socket, services: self.services, backgroundQueue: self.backgroundQueue, options: self.options)
     
         socket.callbackQueue = self.backgroundQueue
         socket.delegate = connection
         socket.connect()
         
         if !connection.waitConnected(timeout: DispatchTime.now() + Double(connectTimeout)) {
-            #if DEBUG
-            print("websocket connect failure")
-            #endif
+            logger.debug("websocket connect failure")
             throw RpcClientError.ConnectError("connect to \(wsUrl) error \(connection.closeError)")
         }
         self.services.addConnection(connection: connection)

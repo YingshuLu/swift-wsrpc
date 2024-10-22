@@ -21,66 +21,46 @@ class Node<T> {
 }
 
 class Queue<T> {
-    var head: Node<T>?
-    var tail: Node<T>?
-    var count: Int
+    private var head: Node<T>?
+    private var tail: Node<T>?
+    private(set) var count: Int = 0
     
-    init() {
-        head = nil
-        tail = nil
-        count = 0
+    var isEmpty: Bool {
+        return head == nil
     }
     
-    func left() -> Int {
-        return self.count
-    }
-    
-    func push(value: T) {
-        let node = Node(value: value)
-        if head == nil {
-            head = node
-            tail = head
-            return
+    func push(_ value: T) {
+        let newNode = Node(value: value)
+        if let tailNode = tail {
+            tailNode.next = newNode
         } else {
-            tail?.next = node
-            tail = node
+            head = newNode
         }
+        tail = newNode
         count += 1
     }
     
-    func peek() -> T? {
-        if head == nil {
-            return nil
+    func pop() -> T? {
+        if let headNode = head {
+            head = headNode.next
+            if head == nil {
+                tail = nil
+            }
+            count -= 1
+            return headNode.value
         }
-        if head?.next == nil {
-            return head?.value
-        }
-        return head?.next?.value
+        return nil
     }
     
-    func pop() -> T? {
-        if head == nil {
-            return nil
-        }
-        var node = head?.next
-        if node != nil {
-            head?.next = node?.next
-        } else {
-            node = head
-            head = nil
-            tail = nil
-        }
-        count -= 1
-        return node?.value
+    func peek() -> T? {
+        return head?.value
     }
 }
 
 class BlockingQueue<T> {
-    let condition = NSCondition()
-    
-    let queue = Queue<T>()
-    
-    var isStopped = false
+    private let condition = NSCondition()
+    private let queue = Queue<T>()
+    private(set) var isStopped = false
     
     func push(value: T) throws {
         if isStopped {
@@ -90,7 +70,7 @@ class BlockingQueue<T> {
         condition.lock()
         defer { condition.unlock() }
         
-        queue.push(value: value)
+        queue.push(value)
         condition.signal()
     }
     

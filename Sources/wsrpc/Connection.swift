@@ -77,18 +77,26 @@ public class Connection: WebSocketDelegate {
     
     private let streamController: StreamController
     
-    private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Connection")
+    private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "connection")
+    
+    internal let options: Options
     
     static private let EmptyData = Data()
     
-    private var mayPieceFrame = false
+    private var isContinuousFrame = false
     
-    init(host: String, socket: Starscream.WebSocket, services: ServiceHolder, backgroundQueue: DispatchQueue) {
+    init(host: String, socket: Starscream.WebSocket, services: ServiceHolder, backgroundQueue: DispatchQueue, options: Options) {
         self.host = host
         self.socket = socket
         self.services = services
         self.backgroundQueue = backgroundQueue
         self.streamController = StreamController(timeout: 3, dispatchQueue: backgroundQueue)
+        self.options = options
+        self.socket.callbackQueue = DispatchQueue(label: "com.bulo.wsrpc.websocket")
+    }
+    
+    deinit {
+        self.close()
     }
     
     public func close() {
@@ -98,6 +106,7 @@ public class Connection: WebSocketDelegate {
             isClosed = true
             sendingQueue.stop()
             socket.disconnect()
+            options.onDisconnectedEvents.invoke(connection: self)
             
             // break circle reference
             socket.delegate = nil
@@ -119,6 +128,7 @@ public class Connection: WebSocketDelegate {
             self.peer = getHttpFieldValue(headers, WebSocketUpgrader.hostIdKey) ?? "anonymous"
             writePumpThread()
             connectedSemaphore.signal()
+            options.onConnectedEvents.invoke(connection: self)
             
         case .disconnected:
             self.close()
@@ -169,7 +179,7 @@ public class Connection: WebSocketDelegate {
     }
     
     private func handleFrame(data: Data) {
-        return mayPieceFrame ? handlePieceFrame(data: data) : handleFullFrame(data: data)
+        return isContinuousFrame ? handleContinuousFrame(data: data) : handleFullFrame(data: data)
     }
     
     private func handleFullFrame(data: Data) {
@@ -198,7 +208,7 @@ public class Connection: WebSocketDelegate {
         }
     }
     
-    internal func handlePieceFrame(data: Data) {
+    internal func handleContinuousFrame(data: Data) {
         cacheDataLock.lock()
         defer { cacheDataLock.unlock() }
         
@@ -322,7 +332,7 @@ public class Connection: WebSocketDelegate {
             try sendingQueue.push(value: frame)
             return true
         } catch let error {
-            logger.error("send frame error \(error)")
+            logger.error("send frame \(frame.opcode) error \(error)")
         }
         return false
     }
@@ -331,9 +341,9 @@ public class Connection: WebSocketDelegate {
         backgroundQueue.async {
             while !self.isClosed {
                 let frame = self.sendingQueue.poll()
-                if frame != nil {
-                    let data = frame?.toBytes()
-                    self.socket.write(data: Data(data!))
+                if let f = frame {
+                    let data = f.toBytes()
+                    self.socket.write(data: Data(data))
                 }
             }
         }

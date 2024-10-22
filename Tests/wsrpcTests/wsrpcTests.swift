@@ -15,7 +15,15 @@ final class Endpoint: Service<Chat_Message, Chat_MessageAck> {
     init(id: UInt64, url: String) {
         hostId = "\(id)"
         self.url = url
-        client = Client(host: hostId)
+        client = Client(host: hostId, options:
+        Options.withConnectedEvent { Connection in
+            print("Connection \(Connection.id) establishment")
+        },
+                        
+        Options.withDisconnectedEvent { Connection in
+            print("Connectin \(Connection.id) disconnected")
+        })
+        
         super.init(name: serviceName)
         client.addService(service: self, options: Options.withRpcSerializer(type: .protobuf))
     }
@@ -75,36 +83,49 @@ final class LocalTests: XCTestCase {
         XCTAssertTrue(endpoint.connect())
         
         DispatchQueue.global(qos: .userInteractive).async {
-            let stream = endpoint.connection?.stream(id: 128, timeout: 10)
             
+            let stream = endpoint.connection?.stream(id: 128, timeout: 5)
             guard let listenStream = stream else {
                 print(">>>>>>> stream 128 not existed")
                 return
             }
+            defer {
+                listenStream.close()
+            }
+            
             do {
                 print(">>>>> stream 128 is listening")
                 try listenStream.accept()
                 print(">>>>>accept \(listenStream.id()) success")
                 
                 let content = ">>>>> hello this from stream 128"
-                listenStream.write(data: content.data(using: .utf8)!)
-                let (code, data) = listenStream.read()
+                let code = listenStream.write(data: content.data(using: .utf8)!)
                 guard code == .ok else {
-                    print(">>>>> read stream error \(code)")
+                    print(">>>>> write stream error \(code)")
                     return
                 }
-                print(">>>>> read from stream count: \(data!.count), content: \(String(data: data!, encoding: .utf8))")
+                
+                let (c, data) = listenStream.read()
+                guard c == .ok else {
+                    print(">>>>> read stream error \(c)")
+                    return
+                    
+                }
+                if let bytes = data {
+                    print(">>>>> read from stream count: \(bytes.count), content: \(String(describing: String(data: bytes, encoding: .utf8)))")
+                }
                 
                 sleep(1)
-                listenStream.close()
                 
             } catch let error {
                 print("stream \(listenStream.id()) accept error \(error)")
             }
         }
-           
+        
+        sleep(1)
         XCTAssertTrue(endpoint.send(message: "hello this is macos"))
         
-        sleep(3)
+        sleep(5)
+        endpoint.connection?.close()
     }
 }

@@ -8,12 +8,14 @@
 import Foundation
 import SwiftProtobuf
 
+@available(macOS 11.0, *)
 internal protocol InternalService {
     var name: String { get }
     var options: Options { get }
     func invokeInternal(requestMessage: Message) -> Message
 }
 
+@available(macOS 11.0, *)
 open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalService {
     private enum internalError: Error {
         case notImplement(String)

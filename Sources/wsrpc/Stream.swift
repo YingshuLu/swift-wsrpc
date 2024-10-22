@@ -136,6 +136,8 @@ class StreamImpl: Stream {
     
     private let dispatchQueue: DispatchQueue
     
+    private var lastFrameIndex: UInt16 = 0
+    
     internal init(id: UInt16, timeout: Int, sendFrame: @escaping (Frame) -> Bool, clean: @escaping (Stream) -> Void, dispatchQueue: DispatchQueue) {
         self.sid = id
         self.timeout = timeout
@@ -162,7 +164,7 @@ class StreamImpl: Stream {
             throw StreamError.RecvError("open recv failed")
         }
         
-        guard let type = typeFrame(frame: frame) else {
+        guard let type = frameType(frame: frame) else {
             close()
             throw StreamError.BrokenFrame("open recv not invalid frame")
         }
@@ -185,7 +187,7 @@ class StreamImpl: Stream {
             throw StreamError.RecvError("accept recv failed")
         }
         
-        guard let type = typeFrame(frame: frame) else {
+        guard let type = frameType(frame: frame) else {
             close()
             throw StreamError.BrokenFrame("accept recv not invalid frame")
         }
@@ -203,6 +205,9 @@ class StreamImpl: Stream {
     }
     
     public func read() -> (IOCode, Data?) {
+    
+    readloop:
+        
         switch state {
         case .inited, .openning, .accepting, .closed:
             return (.error, nil)
@@ -218,33 +223,46 @@ class StreamImpl: Stream {
             return (.eof, nil)
         }
         
-        guard let frame = pollFrame() else {
-            return (.error, nil)
-        }
+        var finFrame: Frame?
         
-        guard let type = typeFrame(frame: frame) else {
-            return (.error, nil)
-        }
-        
-        // here state should be .streaming or .finWait
-        switch type {
-        case .close:
-            if state == .streaming {
-                state = .closeWait
-                return (.eof, nil)
+        repeat {
+            guard let frame = pollFrame() else {
+                return (.error, nil)
             }
             
-        case .accept, .open:
-            if state == .streaming {
-                close()
-            } else {
-                finFrameCondition.signal()
+            guard let type = frameType(frame: frame) else {
+                return (.error, nil)
             }
-            return (.error, nil)
             
-        case .stream:
-            return (.ok, frame.payload)
-        }
+            // here state should be .streaming or .finWait
+            switch type {
+            case .close:
+                if state == .streaming {
+                    if lastFrameIndex + 1 == frame.index {
+                        state = .closeWait
+                        return (.eof, nil)
+                    }
+                    logger.debug("# fin first arrive before bin frame!")
+                    finFrame = frame
+                    continue
+                }
+                
+            case .accept, .open:
+                if state == .streaming {
+                    close()
+                } else { // .finWait
+                    finFrameCondition.signal()
+                }
+                return (.error, nil)
+                
+            case .stream:
+                lastFrameIndex = frame.index
+                if let fin = finFrame {
+                    push(frame: fin)
+                }
+                return (.ok, frame.payload)
+            }
+        }while(true)
         
         return (.error, nil)
     }
@@ -274,10 +292,13 @@ class StreamImpl: Stream {
     }
     
     public func close() {
-        if state == .closed {
+        if state == .closed || state == .finWait {
             return
         }
         
+        defer {
+            logger.debug("stream \(self.sid) closed!")
+        }
         dispatchQueue.async {
             defer {
                 if self.state != .closed {
@@ -289,13 +310,16 @@ class StreamImpl: Stream {
             
             repeat {
                 switch self.state {
-                case .inited, .closed:
+                case .inited:
+                    self.state = .closed
+                    
+                case .closed:
                     return
                     
                 case .openning, .accepting, .streaming:
                     var finFrameArrived = false
                     if let frame = self.cache.peek() {
-                        if let type = self.typeFrame(frame: frame) {
+                        if let type = self.frameType(frame: frame) {
                             if type == .close {
                                 finFrameArrived = true
                             }
@@ -304,28 +328,25 @@ class StreamImpl: Stream {
                     if self.sendFrame(self.finFrame) {
                         self.state = finFrameArrived ? .closed : .finWait
                     } else {
-                        return
+                        self.state = .closed
                     }
                     
                 case .finWait:
                     if self.finFrameCondition.wait(timeout: .now() + .seconds(self.timeout)) == .timedOut {
                         self.logger.warning("close finWait timeout")
-                        return
                     }
-                    return
+                    self.state = .closed
                     
                 case .closeWait:
                     let _ = self.sendFrame(self.finFrame)
-                    return
+                    self.state = .closed
                 }
             } while(true)
         }
     }
     
     internal func push(frame: Frame) {
-        if let t = typeFrame(frame: frame) {
-            logger.info("push stream \(self.sid) frame: \(t.rawValue), payload: \(frame.payload.count)")
-        }
+        logger.debug("push stream \(self.sid) frame: \(frame.opcode), index: \(frame.index), payload: \(frame.payload.count)")
         if FrameOpcode(rawValue: frame.opcode) == .close {
             if state == .accepting || state == .openning {
                 state = .closeWait
@@ -339,7 +360,7 @@ class StreamImpl: Stream {
         do {
             try cache.push(value: frame)
         } catch let error {
-            logger.error("stream push frame error \(error)")
+            logger.error("stream push frame \(frame.opcode) error \(error)")
         }
     }
     
@@ -361,10 +382,12 @@ class StreamImpl: Stream {
     }
     
     private var finFrame: Frame {
-        return controlFrame(opcode: .close)
+        var f = controlFrame(opcode: .close)
+        f.index = nextIndex()
+        return f
     }
     
-    private func typeFrame(frame: Frame) -> FrameOpcode? {
+    private func frameType(frame: Frame) -> FrameOpcode? {
         if let opcode = FrameOpcode(rawValue: frame.opcode) {
             if opcode == .open && frame.flag & FrameFlag.ack.rawValue != 0 {
                 return .accept
