@@ -44,7 +44,7 @@ public class Client {
     
     private let timer: DispatchSourceTimer
     
-    private let logger = Logger(subsystem: "com.bulo.wsrpc", category: "client")
+    private let logger = Logger(subsystem: "com.bulo.wsrpc", category: "Client")
     
     public init(host: String, timeout: Int = 10, keepConnected: Bool = false, dispatchQueue: DispatchQueue? = nil, options: Option...) {
         self.host = host

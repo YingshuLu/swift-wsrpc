@@ -25,7 +25,7 @@ final class Endpoint: Service<Chat_Message, Chat_MessageAck> {
         })
         
         super.init(name: serviceName)
-        client.addService(service: self, options: Options.withRpcSerializer(type: .protobuf))
+        client.addService(service: self)
     }
     
     func online() -> Bool {

@@ -37,11 +37,17 @@ open class Service<T:SwiftProtobuf.Message, U:SwiftProtobuf.Message>: InternalSe
         let replyMessage = Message(data: nil)
         replyMessage.id = requestMessage.id
         
+        guard let codec = SerializerType(rawValue: requestMessage.codec) else {
+            replyMessage.type = RpcType.error.rawValue
+            replyMessage.error = "codec type \(requestMessage.codec) no supported"
+            return replyMessage
+        }
+        
         do {
-            let request: T = try Codec.decode(data: Data(requestMessage.bytes), type: self.options.serializer)
+            let request: T = try Codec.decode(data: Data(requestMessage.bytes), type: codec)
             let reply = try serve(request: request)
             replyMessage.type = RpcType.reply.rawValue
-            replyMessage.bytes = try Codec.encode(message: reply, type: self.options.serializer)
+            replyMessage.bytes = try Codec.encode(message: reply, type: codec)
         } catch let error {
             replyMessage.type = RpcType.error.rawValue
             replyMessage.error = error.localizedDescription

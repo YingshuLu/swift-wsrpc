@@ -11,16 +11,17 @@ enum RpcParseCode {
     case ok, needMore, illegal
 }
 
-enum RpcType: UInt16 {
-    case none = 0
-    case request = 1
-    case reply = 2
-    case error = 3
-    case close = 4
+enum RpcType: UInt8 {
+    case none
+    case request
+    case reply
+    case error
+    case unknown
 }
 
 class Message {
-    var type: UInt16 = RpcType.none.rawValue
+    var type: UInt8 = 0
+    var codec: UInt8 = 0
     var id: UInt32 = 0
     var service: String = ""
     var error: String = ""
@@ -43,12 +44,17 @@ class Message {
         }
 
         var buffer = Data(count: bufSize)
-        Bytes.UInt16ToBytes(value: self.type, bytes: &buffer, start: 0)
-        Bytes.UInt32ToBytes(value: self.id, bytes: &buffer, start: 2)
-        let serviceLen: UInt16 = UInt16(self.service.count)
-        Bytes.UInt16ToBytes(value: serviceLen, bytes: &buffer, start: 6)
+        var start = buffer.startIndex
         
-        let index = 8 + service.count
+        buffer[start] = type
+        buffer[start+1] = codec
+        
+        Bytes.UInt32ToBytes(value: self.id, bytes: &buffer, start: start+2)
+        
+        let serviceLen: UInt16 = UInt16(self.service.count)
+        Bytes.UInt16ToBytes(value: serviceLen, bytes: &buffer, start: start+6)
+        
+        let index = start + 8 + service.count
         buffer.replaceSubrange(8..<index, with: Array(self.service.utf8))
         
         if self.type == RpcType.error.rawValue {
@@ -72,8 +78,14 @@ class Message {
         
         let message = Message(data: nil)
         let start = data.startIndex
-        message.type = Bytes.toUInt16(data: data, start: start)
-        if message.type <= RpcType.none.rawValue || message.type > RpcType.error.rawValue {
+        
+        message.type = data[start]
+        guard message.type > RpcType.none.rawValue && message.type < RpcType.unknown.rawValue else {
+            return (RpcParseCode.illegal, nil)
+        }
+        
+        message.codec = data[start+1]
+        guard message.codec > SerializerType.none.rawValue && message.codec < SerializerType.unknown.rawValue else {
             return (RpcParseCode.illegal, nil)
         }
         

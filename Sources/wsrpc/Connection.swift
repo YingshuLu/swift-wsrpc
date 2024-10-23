@@ -69,19 +69,15 @@ public class Connection: WebSocketDelegate {
     
     private let sendingQueue = BlockingQueue<Frame>()
     
-    private let cacheDataLock = NSLock()
-    
-    private var cacheData = Connection.EmptyData
+    private var cacheData = CacheData(sync: true)
     
     private let backgroundQueue: DispatchQueue
     
     private let streamController: StreamController
     
-    private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "connection")
+    private var logger = Logger(subsystem: "com.bulo.wsrpc", category: "Connection")
     
     internal let options: Options
-    
-    static private let EmptyData = Data()
     
     private var isContinuousFrame = false
     
@@ -167,6 +163,7 @@ public class Connection: WebSocketDelegate {
     internal func call(name: String, requestData: Data, options: Options) throws -> Message {
         let requestMessage = Message(data: requestData)
         requestMessage.type = RpcType.request.rawValue
+        requestMessage.codec = options.serializer.rawValue
         requestMessage.id = self.nextMessageId()
         requestMessage.service = name
         
@@ -209,49 +206,51 @@ public class Connection: WebSocketDelegate {
     }
     
     internal func handleContinuousFrame(data: Data) {
-        cacheDataLock.lock()
-        defer { cacheDataLock.unlock() }
-        
-        if cacheData.isEmpty {
-            cacheData = data
-        } else {
-            cacheData.append(data)
+        cacheData.write(data: data)
+    
+        guard let headerBytes = cacheData.peek(expected: Frame.FrameHeaderSize) else {
+            // need more data
+            return
         }
         
-        while !cacheData.isEmpty {
-            let (code, frame) = Frame.parse(data: cacheData)
-            switch code {
-            case .ok:
-                guard let anyFrame = frame else {
-                    logger.error("parse frame ok, but frame is null, Bug!")
-                    close()
-                    return
-                }
-                
-                if anyFrame.count == cacheData.count {
-                    cacheData = Connection.EmptyData
-                } else if anyFrame.count < cacheData.count {
-                    let start = cacheData.startIndex + anyFrame.count
-                    let end = cacheData.endIndex
-                    cacheData = cacheData.subdata(in: start ..< end)
-                } else {
-                    logger.fault("cacheData.startIndex: \(self.cacheData.startIndex), cacheData.count: \(self.cacheData.count), anyFrame.count: \(anyFrame.count), anyFrame.payload: \(anyFrame.payload.count)")
-                }
-                
-                if anyFrame.flag & FrameFlag.bin.rawValue != 0 {
-                    handleStreamFrame(frame: anyFrame)
-                } else {
-                    handleRpcFrame(frame: anyFrame)
-                }
-                
-            case .needMore:
-                return
-                
-            case .illegal:
-                logger.error("parse frame error, closing...")
-                close()
-                return
-            }
+        let (code, frameHeader) = Frame.parseHeader(data: headerBytes)
+        switch code {
+        case .ok:
+            break
+            
+        case .needMore:
+            return
+            
+        case .illegal:
+            logger.error("illegal frame, parse frame error, closing...")
+            close()
+            return
+        }
+        
+        guard let frame = frameHeader else {
+            logger.error("[BUG] frame Header should not nil, closing...")
+            close()
+            return
+        }
+        
+        guard let bytes = cacheData.read(expected: frame.count) else {
+            // need more data
+            return
+        }
+        
+        guard bytes.count == frame.count else {
+            logger.error("[BUG] bytes should be ready, closing...")
+            close()
+            return
+        }
+        
+        let start = bytes.startIndex + Frame.FrameHeaderSize
+        frame.payload = bytes.subdata(in: start ..< bytes.endIndex)
+        
+        if frame.flag & FrameFlag.bin.rawValue != 0 {
+            handleStreamFrame(frame: frame)
+        } else {
+            handleRpcFrame(frame: frame)
         }
     }
     

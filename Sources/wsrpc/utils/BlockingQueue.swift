@@ -29,6 +29,10 @@ class Queue<T> {
         return head == nil
     }
     
+    internal var firstNode: Node<T>? {
+        return head
+    }
+    
     func push(_ value: T) {
         let newNode = Node(value: value)
         if let tailNode = tail {
