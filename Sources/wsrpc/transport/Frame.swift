@@ -21,7 +21,7 @@ enum FrameOpcode: UInt8 {
     case accept = 4
 }
 
-enum ParseCode {
+enum ParseCode: Int {
     case ok, needMore, illegal
 }
 
@@ -71,12 +71,12 @@ public class Frame {
         return buffer
     }
     
-    static func parse(data: Data) -> (ParseCode, Frame?) {
+    static func parseHeader(data: Data) -> (ParseCode, Frame?) {
         if data.count < FrameHeaderSize {
-            return (ParseCode.needMore, nil)
+            return (.needMore, nil)
         }
         if data[0] != MagicCode {
-            return (ParseCode.illegal, nil)
+            return (.illegal, nil)
         }
         
         let start = data.startIndex
@@ -90,9 +90,24 @@ public class Frame {
 
         frame.index = Bytes.toUInt16(data: data, start: start+10)
         frame.length = Bytes.toUint32(data: data, start: start+12)
+        return (.ok, frame)
+    }
+    
+    static func parse(data: Data) -> (ParseCode, Frame?) {
+        let (code, frameHeaderOnly) = parseHeader(data: data)
+        guard code == .ok else {
+            return (code, nil)
+        }
+        
+        guard let frame = frameHeaderOnly else {
+            return (code, nil)
+        }
+        
         if data.count < frame.count {
             return (.needMore, nil)
         }
+        
+        let start = data.startIndex
         frame.payload = data.subdata(in: start+FrameHeaderSize ..< start+frame.count)
         return (.ok, frame)
     }

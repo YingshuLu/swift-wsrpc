@@ -8,10 +8,11 @@
 import Foundation
 import SwiftProtobuf
 
-public enum SerializerType: Int {
+public enum SerializerType: UInt8 {
     case none
     case protobuf
     case json
+    case unknown
 }
 
 class Codec {

@@ -14,7 +14,6 @@ public class Proxy {
     private let name: String
     private let connection: Connection
     private let options: Options
-
     private let logger = Logger(subsystem: "com.bulo.wsrpc", category: "Proxy")
     
     init(name: String, connection: Connection, options: Options) {

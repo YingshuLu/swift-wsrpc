@@ -205,9 +205,6 @@ class StreamImpl: Stream {
     }
     
     public func read() -> (IOCode, Data?) {
-    
-    readloop:
-        
         switch state {
         case .inited, .openning, .accepting, .closed:
             return (.error, nil)
@@ -224,7 +221,6 @@ class StreamImpl: Stream {
         }
         
         var finFrame: Frame?
-        
         repeat {
             guard let frame = pollFrame() else {
                 return (.error, nil)
@@ -382,7 +378,7 @@ class StreamImpl: Stream {
     }
     
     private var finFrame: Frame {
-        var f = controlFrame(opcode: .close)
+        let f = controlFrame(opcode: .close)
         f.index = nextIndex()
         return f
     }
