@@ -44,7 +44,7 @@ class Message {
         }
 
         var buffer = Data(count: bufSize)
-        var start = buffer.startIndex
+        let start = buffer.startIndex
         
         buffer[start] = type
         buffer[start+1] = codec
